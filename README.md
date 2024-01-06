@@ -2,7 +2,7 @@
 Project for LSE MY472 Final assignment (2023/2024) by candidate 28169. 
 
 #### Note
-・Main codes and reports (750 words limitation)  are included in both .rmd and .html style. Reflecting that this is the open link, these are uploaded the day of the submittion deadline.
+・Main codes and report (750 words limitation) are included in  .Rmd and .html files (identical contents). Reflecting that this is the open link, these are uploaded the day of the submittion deadline.
 
 ・Supplemental data and image to help replication are included in database folders.
 
