@@ -1,0 +1,960 @@
+---
+title: 'MY472_Assignment#4 (summative)' 
+author: "Current year candidate number: 28169"
+date: "2024-01-06"
+output: html_document
+---
+#### [This](https://github.com/kmjpn/MY472_Final_Assignment_28169) is the open link to GitHub repo for this final report.
+・Please read the __notes__ (totally 30) in the code chunks for detailed processes for replication or evaluation. Information for API ( __registration__ is essential in some cases), concrete flows of cleaning data, explanation of terms and variables, __warnings of potential output gaps due to the difference of access dates__, are included.
+
+・As for terminology, __"song" and "track"__, the units of each artist's audio work, __are identical__ meaning in this report. Five __memos__ , __not__ included in the word count, are attached to plots to help interpretation.
+  
+  (Word count starts __from__ the following line to the end of "Analysis" paragraphs.)
+
+### *Research Question*
+
+>“Rolling Stone Magazine ranked their 100 greatest musical artists of all time. At the end of 2023, how has their music endured? Are there any features or characteristics that seem to explain enduring engagement?"
+
+### *Introduction*
+
+>The era of listening to music by streaming, enjoying unlimited access for a fixed price, is intensifying. The evaluation criteria for artists, historically competed in the amounts of sales like CDs, may be changing. In this report, reflecting that consistent but only weak positive relationships are observed between the historically honored artists with popularity on the streaming website in 2023, I would claim there is much room to access additional factors for popularity unique to the current situation. 
+  
+>Then, after confirming the strong connection between artists' popularity and their songs, I would examine the connection of these two dimensions with music-related variables, obtained from Spotify, Genius, and iTunes. Based on these, I would conclude that impression is one of the keys to popularity. Upbeat songs that make people want to loud and dance, frequently seen in movies, and repeating impressive words like rejecting words, tend to catch the audience's ears. 
+
+### *Data*
+
+>I would use the data from four sources.
+
+>(1) Rolling Stone: 100 historical artists awarded by this music information media in 2010. Obtained by web scraping. They are ranked from 1 to 100.
+
+>(2) Spotify: Popularity of (1) and their main songs (up to 20 for each), and numeric feature elements of artists and songs (e.g. artists' number of followers, songs duration, tempo) are collected via API. After data cleaning of excluding missing and confounding items (details are shown in notes in the code appendix), 83 artists and 1422 songs would be examined.
+
+>(3) Genius: Lyric data of representative songs by 83 artists are obtained via API and web scraping. After the filtering processes, 615 songs would be studied.
+
+>(4) Apple (iTunes): The number of search results of 83 artists in the movie section of the Apple iTunes store, downloaded via API. A total of 955 hits returned.
+
+>These data were imported between December 15th and 17th, and stored in 11 tables gathered under the author's relational database and in other 2 RDS files. These are also uploaded in the GitHub repo above. Importantly, the output is subject to change by the access date to sources. 5 plots (information shown here, such as number of observations, is omitted) are displayed with short memos, which are outside of word counts.
+
+### *Analysis*
+  
+>First, as for artists' performance, there is a loosely positive relationship between historical evaluations in 2010 by Rolling Stone, and the popularity of streaming services in Spotify evaluations in 2023, but there is a large variation (__Plot 1__).
+  
+>Next, not surprisingly, artists' overall popularity and their songs' popularity are highly correlated (__Plot 2__). That justifies analyzing features of popular songs could also help detect artists' popularity. Popular singers consistently have major highly popular songs, and vice versa. Rather than being a "one-hit wonder" relying on a single hit song, they seem to have a formula for producing successive hit songs and strong fan base.
+  
+>Then, analyzing the features of popular songs of Spotify data, three major influencing elements of popularity are loudness, danceability and energy (__Plot 3__). In short, it suggests that people prefer impressive songs. In this age of casually streaming music, people do not only listen to the music but also arrange it in their way, and share it on websites like TikTok and YouTube. Impressive songs could fit these customs. 
+    
+>On the other hand, there is a negative correlation between acousticness, the resonant elements of the physical instrument itself, and liveness, the atmosphere of listening to it on the spot. This implies that for the streaming generation listening to songs repeatedly, it's not important to listen to vivid instruments and voices on a site as only a one-time experience. 
+  
+>The importance of impression can be observed in lyrics analysis from Genius data. Popular songs tend to have more chapters and many words, but the variety of words has inverse effects (__Plot 4__). This denotes repeating the same message in similarly structured chapters could attract an audience. A popular song frequently includes impressive words such as "don't", "all", and "no". 
+  
+>Last, there is a mild but positive relationship between exposure to movies in iTunes search and popularity (__Plot 5__), supporting the hypothesis that impression, one of the essences of movies compared with other media expressions, affects popularity.
+
+(Word Count: 735)
+
+```{r setup: library, include=FALSE,warning=FALSE}
+
+#Load libraries (Note 1: No particular order. Included in the .html document for the ease of replication)
+#Install.packages("spotifyr") install a package for Spotify analysis
+#Install.packages("appler") install a package for Apple iTunes analysis
+#Install.packages("geniusr") install a package for Genius analysis
+library(DBI)
+library(RSQLite)
+library(rvest)
+library(RSelenium)
+library(dplyr)
+library(spotifyr)
+library(tidyverse)
+library(ggplot2)
+library(knitr)
+library(magrittr)
+library(ggrepel)
+library(httr)
+library(gridExtra)
+library(appler)
+library(geniusr)
+library(reshape2)
+```
+
+
+```{r private_files, include=FALSE,warning=FALSE,echo=FALSE,eval=TRUE}
+
+#Specify the file path  (Note 2: for replication, please specify your path)
+MY472_assign4_database <- "MY472_Assignment4_database_28169"
+```
+
+
+```{r main_code_chank_1, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE}
+
+#Newly create a SQLite file and set the folder path  (Note 3: for replication, please specify your database file and path)
+my_db <- "MY472_assign4_28169.sqlite" 
+folder_path <- MY472_assign4_database 
+
+#Establish a connection to the SQLite database and create a database file
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Disconnect
+dbDisconnect(db)
+
+#Load datasets used for the author's analysis, created between December 15th and 17th. Totally 11 tables from the relational database, and 2 dataset as RDS files.
+#It could be created(replicated) after running all code chunks below, which mean for replication, loading these files are not essential.
+#(Note 4: Repeatedly, the contents of the data are subject to change based on the access date to the original data source. If needed for verification of the author's discussion, please download these files from the GitHub repository to local environment, then specify the local path and load.)
+
+ con <- dbConnect(RSQLite::SQLite(), file.path(folder_path, my_db))
+ Merged_Rolling_Spotify_cleaned <- dbGetQuery(con, "SELECT * FROM Merged_Rolling_Spotify_cleaned")
+ songs_data_df_all <- dbGetQuery(con, "SELECT * FROM songs_data_df_all")
+ songs_features_data_all <- dbGetQuery(con, "SELECT * FROM songs_features_data_all")
+ itunes_movie_result_by_artist <- dbGetQuery(con, "SELECT * FROM itunes_movie_result_by_artist")
+ genius_songs_extracted <- dbGetQuery(con, "SELECT * FROM genius_songs_extracted")
+ genius_lyrics_features <- dbGetQuery(con, "SELECT * FROM genius_lyrics_features")
+ itunes_movie_artist_exposure_rolling_spotify <- dbGetQuery(con, "SELECT * FROM itunes_movie_artist_exposure_rolling_spotify")
+ songs_data_df_all_analysis <- dbGetQuery(con, "SELECT * FROM songs_data_df_all_analysis") #This table generated later 
+ songs_data_df_all_analysis_genius <- dbGetQuery(con, "SELECT * FROM songs_data_df_all_analysis_genius") 
+ songs_data_df_all_analysis_genius_high_pop <- dbGetQuery(con, "SELECT * FROM songs_data_df_all_analysis_genius_high_pop") 
+ songs_data_df_all_analysis_genius_low_pop <- dbGetQuery(con, "SELECT * FROM songs_data_df_all_analysis_genius_low_pop") 
+ dbDisconnect(con)
+ mother_spotify_search_list <- readRDS("mother_spotify_search_list.rds")
+ genius_song_lyrics_info_list <- readRDS("genius_song_lyrics_info_list.rds")
+```
+
+```{r main_code_chank_2 Scraping Rollingstone, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE,eval=FALSE}
+
+#Main Codes for analysis
+#Create a function to get artist ranking by Rolling Stone in 2010
+get_rolling_artist_rank <- function(url){
+#Start a Selenium server, using Firefox
+rD <- rsDriver(browser = c("firefox"), verbose = FALSE, port = netstat::free_port(random = TRUE), chromever = NULL) 
+driver <- rD[["client"]]
+ driver$navigate(url)
+  Sys.sleep(3) 
+  cookie_accept_button <- driver$findElement(using = "css selector", value = "#onetrust-accept-btn-handler")
+  cookie_accept_button$clickElement() #Accept cookies
+  Sys.sleep(3)
+
+#Get ranking numbers
+Rolling_Artist_Rank_element<- driver$findElements(using = 'css selector', value = 'span.c-gallery-vertical-album__number')
+Rolling_Artist_Rank <- sapply(Rolling_Artist_Rank_element, function(element) element$getElementText()) %>% unlist()
+
+#Get artist names
+Rolling_Artist_Name_element <- driver$findElements(using = 'css selector', value = 'h2.c-gallery-vertical-album__title')
+Rolling_Artist_Name <- sapply(Rolling_Artist_Name_element, function(element) element$getElementText()) %>% unlist()
+
+#Close the session ans stop the Selenium server
+driver$close()
+rD$server$stop()
+
+#Create a table
+Rolling_Artist_Table <- data.frame(Rolling_Artist_Rank = Rolling_Artist_Rank, Rolling_Artist_Name = Rolling_Artist_Name)
+
+#Output the table
+return(Rolling_Artist_Table)
+}
+
+#Apply the function (two folds)
+rolling_100_to_51 <- ("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446/")
+rolling_50_to_1 <-("https://www.rollingstone.com/music/music-lists/100-greatest-artists-147446/the-band-2-88489/")
+
+Rolling_rank_table_100_to_51 <- get_rolling_artist_rank(rolling_100_to_51)
+Rolling_rank_table_50_to_1 <- get_rolling_artist_rank(rolling_50_to_1)
+
+#Merge, adjust, arrange and write a table to database (to avoid repetitive scraping)
+Rolling_rank_table_100_to_1 <- bind_rows(Rolling_rank_table_100_to_51,Rolling_rank_table_50_to_1)
+Rolling_rank_table_100_to_1$Rolling_Artist_Rank <- as.numeric(Rolling_rank_table_100_to_1$Rolling_Artist_Rank)
+Rolling_rank_table_100_to_1　<- Rolling_rank_table_100_to_1 %>% arrange(Rolling_Artist_Rank)
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write it to SQLite
+dbWriteTable(db, "Rolling_rank_table_100_to_1",Rolling_rank_table_100_to_1, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+
+```{r main_code_chank_3 Spotify API setup, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Set up Spotify API and R resources for it (Note 5: For replication, personal account is needed. Please refer to following urls.)
+#(References:
+# https://developer.spotify.com/documentation/web-api 
+# https://cran.r-project.org/web/packages/spotifyr/spotifyr.pdf )
+
+#Set API key and secret (password)
+readRenviron("28169_API_SPOTIFY.env")
+Sys.setenv(SPOTIFY_CLIENT_ID = Sys.getenv("28169_API_SPOTIFY_CLIENT_ID")) #Your ID
+Sys.setenv(SPOTIFY_CLIENT_SECRET = Sys.getenv("28169_API_SPOTIFY_CLIENT_SECRET")) #Your Secret
+access_token <- get_spotify_access_token()
+```
+
+```{r main_code_chank_4 Search RollingStone awarded artists in Spotify, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Prepare an emply list to store spotify data
+mother_spotify_search_list <- list()
+
+#A function to search artist namesin in Spotify and get information via API 
+search_and_get_spotify_data <- function(keyword_vector = Rolling_rank_table_100_to_1$Rolling_Artist_Name) { 
+  for (i in 1:length(keyword_vector)) {
+  search_result <- search_spotify(keyword_vector[i], type = c("album", "artist", "track"))
+  mother_spotify_search_list[[i]] <- search_result
+  }
+  return(mother_spotify_search_list)
+}
+
+#Apply the function for artists picked up by Rolling Stone, and save as RDS file 
+#(Note 6: For easeness of handling as list type data, I have selected not to write to relational database but RDS file.)（
+#(Note 7: Data for the author's analysis was obtained on December 15, 2023. Data could be subject to change by day.)
+mother_spotify_search_list <- search_and_get_spotify_data(Rolling_rank_table_100_to_1$Rolling_Artist_Name)
+
+saveRDS(mother_spotify_search_list, file = "mother_spotify_search_list.rds")
+```
+
+```{r main_code_chank_5 Merge Spotify Artist info with Rollingstone, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#From spotify mother data above, extract artists names, their spotify IDs, popularity scores and the number of followers
+extract_mother_list_1 <- list()
+for (i in 1:100){
+  extract_mother_list_1[[i]] <- as.tibble(mother_spotify_search_list[[i]]$artists$items)
+}
+artist_spotify_id_popularity <- bind_rows(extract_mother_list_1) %>% select(name,id,popularity,followers.total)
+artist_spotify_id_popularity$id <- as.numeric(artist_spotify_id_popularity$id)
+artist_spotify_id_popularity$popularity <- as.numeric(artist_spotify_id_popularity$popularity)
+artist_spotify_id_popularity$followers.total <- as.numeric(artist_spotify_id_popularity$followers.total)
+
+#Left Join to Rolling Stone ranking data by artist names
+Merged_Rolling_Spotify <- Rolling_rank_table_100_to_1 %>%
+  left_join(artist_spotify_id_popularity, by = c("Rolling_Artist_Name" = "name"))
+
+#Drop duplication, the criteria is the number of followers 
+#(Note 8: Here, the important assumption is that official artists have the highest number of followers, in case when the name overlaps.).
+#(Note 9: According to the Spotify official statement, popularity is the value "between 0 and 100, with 100 being the most popular. The artist's popularity is calculated from the popularity of all the artist's tracks.")
+Merged_Rolling_Spotify_cleaned <- Merged_Rolling_Spotify %>%
+  group_by(Rolling_Artist_Rank) %>%
+  arrange(desc(n()), desc(followers.total)) %>%
+  slice(1) %>%
+  ungroup()
+
+#Check the number of missing value (commented out)
+#na_counts <- colSums(is.na(Merged_Rolling_Spotify_cleaned))
+#(Note 10: the result (not displayed .html file) is 12 out of 100, nearly 90% are covered (and data is available up to the Top 25). I have judged it's sufficient for analysis.)
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table Merged_Rolling_Spotify_cleaned to SQLite
+dbWriteTable(db, "Merged_Rolling_Spotify_cleaned",Merged_Rolling_Spotify_cleaned, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+```{r main_code_chank_6 Analysis 1, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Examine the table Merged_Rolling_Spotify_cleaned (commented out)
+#summary(Merged_Rolling_Spotify_cleaned) #About 90 percent of artists have over 500000 followers.
+#glimpse(Merged_Rolling_Spotify_cleaned)
+
+#(Note 11: Reflecting on the summary, I would drop off 12 rows (NAs) and 5 artists whose number of followers is under 100000. The latter is because there are concerns that these artists are not official, or even if they are official, they are not popular for special reasons (e.g. not willing to provide songs to Spotify or just added to Spotify). It could underestimate their performance.
+#(Note 12: For information, 5 artists are: 
+#Rank 88, Jay-Z, followers: 1
+#Rank 79, The Four Tops followers: 56
+#Rank 86, Tupac Shakur, followers: 4837
+#Rank 90, Carlos Santana, followers: 6108
+#Rank 64, Phil Spector, followers: 27700)
+
+Merged_Rolling_Spotify_cleaned <- Merged_Rolling_Spotify_cleaned %>% filter (!is.na(followers.total)) %>% filter(followers.total > 100000)
+
+#Plot Rolling Stone honored artist (historical great artists as of 2010) and momentum in Spotify in 2023
+#Rolling Stone rank versus Spotify Popularity
+plot_left <- ggplot(Merged_Rolling_Spotify_cleaned, aes(x = Rolling_Artist_Rank, y = popularity)) +
+  geom_point() +
+  ggtitle("Rolling Rank vs Spotify popularity")+
+  theme(plot.title = element_text(size = 10))+
+  geom_smooth() +
+  scale_x_continuous(limits= c(1, 100), breaks = c(1, seq(10, 100, by = 10))) +
+  scale_y_continuous(limits = c(0, 100), breaks = seq(0, 100, by = 10))+
+  labs(x = "Rolling Stone ranking", y = "Spotify Popularity") +
+  theme(axis.title.x = element_text(size = 9))+
+  theme(axis.title.y = element_text(size = 7))+
+  annotate("text", x = 100, y = 30, label = "Each dot shows individual artists", hjust = 1, vjust = 0, size = 2)+
+  annotate("text", x = 100, y = 10, label = "Source: Rolling Stone, Spotify", hjust = 1, vjust = 0, size = 2)+
+  annotate("text", x = 100, y = 5, label = "Popularity between 0 to 100 (highest)", hjust = 1, vjust = 0, size = 2)+
+  annotate("text", x = 100, y = 0, label = "calculated by Spotify", hjust = 1, vjust = 0, size = 2)
+
+
+#Rolling Stone rank versus Spotify followers
+plot_right <- ggplot(Merged_Rolling_Spotify_cleaned, aes(x = Rolling_Artist_Rank, y = followers.total))+
+  geom_point() +
+  ggtitle("Rolling Rank vs Spotify Followers")+
+  theme(plot.title = element_text(size = 10))+
+  geom_smooth() +
+  scale_x_continuous(limits = c(1, 100), breaks = c(1, seq(10, 100, by = 10))) +
+  scale_y_log10(breaks = c(100000, 500000, 1000000, 2000000, 3000000, 5000000, 10000000, 100000000),labels = c("100000", "500000", "1000000", "2000000", "3000000", "5000000", "10000000", "100000000"))+
+  labs(x = "Rolling Stone ranking", y = "Number of followers in Spotify") +
+  theme(axis.title.x = element_text(size = 9))+
+  theme(axis.title.y = element_text(size = 7))+
+  annotate("text", x = 100, y = 700000, label = "Each dot shows individual artists", hjust = 1, vjust = 0, size = 2)+
+  annotate("text", x = 100, y = 200000, label = "Source: Rolling Stone, Spotify", hjust = 1, vjust = 0, size = 2)+
+  annotate("text", x = 100, y = 110000, label = "Followers are displayed on a logarithmic scale", hjust = 1, vjust = 0, size = 2)
+
+#Display and save
+plot_rolling_spotify_1 <- grid.arrange(plot_left, plot_right, ncol = 2)
+ggsave(filename = "plot_rolling_spotify_1.png", plot = plot_rolling_spotify_1, width = 6, height = 4, dpi = 300)
+
+#(Note 13: Statistical information, commented out: basic linear regression model, between Rolling Stone Artist Rank and Spotify followers)
+#spotify_pop_rolling_rank_model <- lm(log(followers.total) ~ Rolling_Artist_Rank, data = #Merged_Rolling_Spotify_cleaned)
+#summary(spotify_pop_rolling_rank_model)
+```
+### Plot 1: Rolling Stone Rank vs Spotify Popularity
+### ![Plot 1: Rolling Rank vs Spotify presence](plot_rolling_spotify_1.png)
+
+#### *Memo for Plot 1*
+・Rolling Stone artist ranking in 2010 and popularity or the number of followers in Spotify, are slightly positively correlated, with wide confidence intervals
+
+```{r main_code_chank_7 Getting tracks overview data, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Create functions to get featured songs (max.20 per artist) from mother_spotify_search_list created
+#(Note 14: These are from the top 20 results of each artist name via Spotify API. Relying on the Spotify's search algorithm, these represent the most listened to songs of each artist. By filtering through artists ID, I would prevent songs by other persons from mixing in.)
+#(Note 15: It's possible to change the number "20" by setting limit argument on Spotify API.)
+
+get_featured_songs_of_rolling_artists <- function(mother_spotify_search_list = mother_spotify_search_list) {
+  songs_data_list_all <- list() 
+
+  for (i in 1:83) { #"83" is the number of research target (12 missing value, 5 unreliable as discussed)
+    songs_data_list <- list() 
+
+    for (j in 1:20) { #Top 20 search results for each artist
+      artist_id <- mother_spotify_search_list[[i]]$tracks$items$artists[[j]]$id
+
+      if (any(artist_id %in% Merged_Rolling_Spotify_cleaned$id)) { #Verify artist_id and select elements shown below
+        artist_name <- mother_spotify_search_list[[i]]$tracks$items$artists[[j]]$name
+        track_id <- mother_spotify_search_list[[i]]$tracks$items$id[j]
+        track_name <- mother_spotify_search_list[[i]]$tracks$items$name[j]
+        track_duration_ms <- mother_spotify_search_list[[i]]$tracks$items$duration_ms[j]
+        track_popularity <- mother_spotify_search_list[[i]]$tracks$items$popularity[j]
+        track_local_flag <- mother_spotify_search_list[[i]]$tracks$items$is_local[j]
+        track_type <- mother_spotify_search_list[[i]]$tracks$items$type[j]
+        track_number <- mother_spotify_search_list[[i]]$tracks$items$track_number[j]
+        album_id <- mother_spotify_search_list[[i]]$tracks$items$album.id[j]
+        album_name <- mother_spotify_search_list[[i]]$tracks$items$album.name[j]
+        album_type <- mother_spotify_search_list[[i]]$tracks$items$album.album_type[j]
+        album_available_markets <- mother_spotify_search_list[[i]]$tracks$items$album.available_markets[j]
+        album_release_date <- mother_spotify_search_list[[i]]$tracks$items$album.release_date[j]
+        album_release_date_precision <- mother_spotify_search_list[[i]]$tracks$items$album.release_date_precision[j]
+        album_total_tracks <- mother_spotify_search_list[[i]]$tracks$items$album.total_tracks[j]
+#Create a dataframe
+        songs_data <- data.frame( 
+          artist_id = artist_id, 
+          artist_name = artist_name,
+          track_id = track_id,
+          track_name = track_name,
+          track_duration_ms = track_duration_ms,
+          track_popularity = track_popularity,
+          track_local_flag = track_local_flag,
+          track_type = track_type,
+          track_number = track_number,
+          album_id = album_id,
+          album_name = album_name,
+          album_type = album_type,
+          album_release_date = album_release_date,
+          album_release_date_precision = album_release_date_precision,
+          album_total_tracks = album_total_tracks
+        )
+
+        songs_data_list[[j]] <- songs_data 
+      }
+    }
+    if (length(songs_data_list) > 0) {
+      songs_data_list_all[[i]] <- bind_rows(songs_data_list)
+    }
+  }
+  return(songs_data_list_all)  
+}
+
+#Apply the function and transform to a data frame
+songs_data_list_all <- get_featured_songs_of_rolling_artists(mother_spotify_search_list)
+songs_data_df_all <- bind_rows(songs_data_list_all)
+
+#Check the sample size (commented out)
+#nrows(songs_data_df_all)
+#(Note 16: The number of songs is 1422 (not displayed in .html file), in other words, 17.1 songs per artist (Repeatedly, if the artist has a lot of hit songs, maximum could be 20 in this case.))
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table Merged_Rolling_Spotify_cleaned to SQLite
+dbWriteTable(db, "songs_data_df_all", songs_data_df_all, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+```{r main_code_chank_8 Getting tracks features data, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Based on the 1422 tracks, create a function to get features of each songs via Spotify API (using track_id)
+get_all_track_audio_features <- function(track_id = songs_data_df_all$track_id) {
+  songs_features_data_all <- data.frame()  
+  
+  for (id_elements in track_id) {
+    track_features <- get_track_audio_features(id_elements)  
+    if (nrow(track_features) > 0) {
+      songs_features_data_all <- bind_rows(songs_features_data_all, track_features)  
+    }
+  }
+  
+  return(songs_features_data_all)
+}
+
+#Apply the function, and importantly, to prevent confusions in the relational database, rename "id" to "track_id"
+songs_features_data_all <- get_all_track_audio_features(songs_data_df_all$track_id)
+colnames(songs_features_data_all)[colnames(songs_features_data_all) == "id"] <- "track_id"
+
+#(Note 17: For further analysis, API method "get_track_audio_analysis(track_id)" is available. However, considering the project scope, in this essay, I would not access this data.)
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table songs_features_data_all to SQLite
+dbWriteTable(db, "songs_features_data_all",songs_features_data_all, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+```{r main_code_chank_10 Genius API setup, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+#Next I would prepare lyrics data for further analysis, using Genius API.
+#Set up Genius API
+#(Note 18: For replication, personal account is needed. Please refer to following urls.))
+#(References:
+# https://genius.com/developers
+# https://cran.r-project.org/web/packages/geniusr/geniusr.pdf )
+
+#Set API key and secret token
+readRenviron("28169_API_GENIUS.env") 
+Sys.setenv(GENIUS_API_TOKEN = Sys.getenv("28169_API_GENIUS_TOKEN_ID")) #Your secret token
+```
+
+```{r main_code_chank_11 Genius data download, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Create a function to get song information via Genius API
+get_genius_song <- function(search_words){ 
+  genius_song_info_all <- data.frame()
+  for (i in 1:nrow(search_words)) {
+  genius_song_info <- search_song(search_words[i], n_results = 3, access_token = genius_token())
+  genius_song_info_all <- rbind(genius_song_info_all, genius_song_info)
+}
+  return(genius_song_info_all)
+}
+
+#Apply it for song lists in songs_data_df_all (already extracted from Spotify) 
+#(Note 19: Accessed on December 17, 2023. After excluding (potentially) confusing music and duplication, 615 songs remained, but again, the number could change by the day accessed.)
+genius_song_info_all <- get_genius_song(songs_data_df_all$track_name)
+
+genius_song_info_cleaned <- genius_song_info_all #This copy is, in fact, redundant, only due to the author's circunstances (avoid the dissaperence of original data in the process of trial and error
+for (i in 1:nrow(genius_song_info_cleaned)) {
+  if (!(genius_song_info_cleaned$artist_name[i] %in% Merged_Rolling_Spotify_cleaned$Rolling_Artist_Name)) {
+    genius_song_info_cleaned <- genius_song_info_cleaned[-i, ]
+  }
+}
+#Rename and exclude confusing songs
+genius_song_info_cleaned <- rename(genius_song_info_cleaned, genius_artist_name = artist_name) 
+genius_song_info_cleaned <- rename(genius_song_info_cleaned, genius_song_name = song_name) 
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table "genius_song_info_cleaned" to SQLite
+dbWriteTable(db, "genius_song_info_cleaned",genius_song_info_cleaned, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+
+#To exclude duplications, left join and apply distinct(), save as a genius_songs_extracted
+genius_songs_extracted <- data.frame(mother_track_name = songs_data_df_all$track_name)
+genius_songs_extracted <- left_join(genius_songs_extracted, genius_song_info_cleaned, by = c("mother_track_name" = "genius_song_name"))
+genius_songs_extracted <- genius_songs_extracted[!is.na(genius_songs_extracted$song_lyrics_url), ]
+genius_songs_extracted <- genius_songs_extracted %>%
+  distinct(mother_track_name, .keep_all = TRUE)
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table "genius_song_info_cleaned" to SQLite
+dbWriteTable(db, "genius_songs_extracted", genius_songs_extracted, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+
+#Create a function to scrape lyrics and storage as a list (not a data frame, because the length of each vector is different by the number of paragraphs) from Genius webpage 
+#(Note 20: R's "geniusr" has the functions to get lyrics (eg: "get_lyrics_id()), however, as of December 17, 2023 it doesn't work.) 
+get_genius_song_lyrics_info <- function(song_lyrics_urls) {
+  get_lyrics_from_song <- function(url) {
+    tryCatch({
+      webpage <- read_html(url, timeout = 5)  
+      lyrics <- webpage %>%
+        html_nodes('div[data-lyrics-container="true"]') %>%
+        html_text()
+      
+      return(lyrics)
+    }, error = function(e) {
+      
+      print(paste("Error:", e))
+      return(list())
+    })
+  }
+  
+  lyrics_list <- lapply(song_lyrics_urls, get_lyrics_from_song)
+  
+  return(lyrics_list)
+}
+
+
+#Apply it for genius_song_info's song_lyrics_url column (Accessed on December 17th, 2023)
+genius_song_lyrics_info_list <- get_genius_song_lyrics_info(genius_songs_extracted$song_lyrics_url)
+
+temp <- genius_song_lyrics_info_list
+
+
+#Save the list as RDS file
+saveRDS(genius_song_lyrics_info_list, file = "genius_song_lyrics_info_list.rds")
+
+#Create a function to get features of lyrics
+get_lyrics_feature <- function(lyrics) {
+  n_chapter_lyrics <- length(lyrics) #number of chapters as a length of each vector
+  
+  
+  lyrics_combined <- paste(lyrics, collapse = " ") #Gather vectors
+  
+  #Clean data
+  cleaned_lyrics <- gsub("\\[[^]]*\\]", "", lyrics_combined)
+  cleaned_lyrics <- gsub('"', '', cleaned_lyrics)
+  cleaned_lyrics <- gsub("[[:punct:]]", "", cleaned_lyrics)
+  cleaned_lyrics <- gsub("([a-z])([A-Z])", "\\1 \\2", cleaned_lyrics, perl = TRUE)
+  cleaned_lyrics <- gsub("\\s+", " ", cleaned_lyrics)
+  cleaned_lyrics <- tolower(cleaned_lyrics)  
+  
+  #Create indicators for word alalysis
+  n_words_lyrics <- length(unlist(strsplit(cleaned_lyrics, " ")))
+  n_words_distinct <- length(unique(unlist(strsplit(cleaned_lyrics, " "))))
+  
+  word_freq <- table(unlist(strsplit(cleaned_lyrics, " ")))
+  word_freq_sorted <- sort(word_freq, decreasing = TRUE)
+  freq_words <- names(head(word_freq_sorted, 5))
+  
+  lyrics_feature_result <- c(n_chapter_lyrics = n_chapter_lyrics,
+              n_words_lyrics = n_words_lyrics,
+              n_words_distinct = n_words_distinct,
+              freq_word_1 = freq_words[1], 
+              freq_word_2 = freq_words[2],
+              freq_word_3 = freq_words[3],
+              freq_word_4 = freq_words[4],
+              freq_word_5 = freq_words[5])
+  
+  return(lyrics_feature_result)
+}
+
+#Apply the function, bind and assign artists/songs name
+genius_lyrics_features <- lapply(genius_song_lyrics_info_list, get_lyrics_feature)
+genius_lyrics_features <- do.call(rbind, genius_lyrics_features)
+genius_lyrics_features <- as.data.frame(genius_lyrics_features)
+genius_lyrics_features$genius_mother_track_name <- genius_songs_extracted$mother_track_name
+genius_lyrics_features$genius_artist_name <- genius_songs_extracted$genius_artist_name
+
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table "genius_lyrics_feature" to SQLite
+dbWriteTable(db, "genius_lyrics_features", genius_lyrics_features, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+
+```{r main_code_chank_9 iTunes Data, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, eval=FALSE}
+
+#Lastly, I would search the relationship between exposure in movies with artists or songs. 　
+#(Note 21: Desirebly, I should examine data of pairs of songs and movies, but since I couldn't find a database that accurately incorporates these kind of data (including IMdb https://www.imdb.com/). 
+#Then, I would use the iTunes API provided by Apple to capture the ovewview of artists' exposures in movies, using the search results for the "Movie" section in iTunes Store, by creating following function. As of end of 2023, unique API key is not needed.)
+#(References:
+#https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/index.html
+#https://cran.r-project.org/web/packages/appler/appler.pdf )
+
+get_itunes_movie_function <- function(itunes_search_vector) {
+  itunes_movie_merged_data <- data.frame()
+  for (i in 1:length(itunes_search_vector)) {
+    itunes_temp_data <- search_apple(
+      itunes_search_vector[i],
+      country = "us", #Essential to specify a country (I would use the United States)
+      media = "movie",
+      entity = NULL,
+      attribute = NULL,
+      limit = 200
+    )
+    itunes_temp_data$rolling_artist_name <- itunes_search_vector[i]
+    names(itunes_temp_data)[names(itunes_temp_data) == "artistName"] <- "apple_artist_name"
+    names(itunes_temp_data)[names(itunes_temp_data) == "trackName"] <- "apple_track_name"
+    itunes_movie_merged_data <- bind_rows(itunes_movie_merged_data, itunes_temp_data) 
+    if (i < length(itunes_search_vector)) {
+      Sys.sleep(4) #Sleep time reflecting the statement by Apple that "The Search API is limited to approximately 20 calls per minute (subject to change)".
+    }
+  }
+  return(itunes_movie_merged_data)
+}
+
+#Apply the function 
+#(Note 22: Considering the "Sys. sleep(4)" in the function, it can be done in one session, however, due to the unexpected termination of R studio on the author's terminal, I have decided to run it separately. )
+#(Note 23: Data aqcuired on December 16, 2023 for the report. Data could change by day.)
+itunes_movie_result_by_artist_1_of_4 <- get_itunes_movie_function(Merged_Rolling_Spotify_cleaned$Rolling_Artist_Name[1:20])
+itunes_movie_result_by_artist_2_of_4 <- get_itunes_movie_function(Merged_Rolling_Spotify_cleaned$Rolling_Artist_Name[21:40])
+itunes_movie_result_by_artist_3_of_4 <- get_itunes_movie_function(Merged_Rolling_Spotify_cleaned$Rolling_Artist_Name[41:60])
+itunes_movie_result_by_artist_4_of_4 <- get_itunes_movie_function(Merged_Rolling_Spotify_cleaned$Rolling_Artist_Name[61:83])
+
+itunes_movie_result_by_artist <- bind_rows(
+  itunes_movie_result_by_artist_1_of_4,
+  itunes_movie_result_by_artist_2_of_4,
+  itunes_movie_result_by_artist_3_of_4,
+  itunes_movie_result_by_artist_4_of_4
+)
+
+#In case searching by tracks (commented out. the author didn't conduct reflecting the scope of the analysis)
+#There are 1422 elements, which mean at least around 2-hour runtimes are needed, even if smoothly worked.
+#itunes_movie_result_by_track  <- get_itunes_movie_function(songs_data_df_all$track_name) 
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the table "itunes_movie_result_by_artist" to SQLite
+dbWriteTable(db, "itunes_movie_result_by_artist", itunes_movie_result_by_artist, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+
+
+```{r main_code_chank_12 Analysis 2, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, include=FALSE}
+#Based on the data collected, I would analyze it.
+#Left join artists popularity to songs_data_df_all including each tracks' popularity
+songs_data_df_all_analysis <- left_join(songs_data_df_all, Merged_Rolling_Spotify_cleaned, by = c("artist_name" = "Rolling_Artist_Name"))
+songs_data_df_all_analysis <- songs_data_df_all_analysis[!is.na(songs_data_df_all_analysis$Rolling_Artist_Rank), ]
+songs_data_df_all_analysis <- songs_data_df_all_analysis %>%
+  arrange(-popularity)
+
+#First, check the relationship between popularity of artists and their songs
+pop_artist_songs_plot_2 <- ggplot(songs_data_df_all_analysis, aes(x = reorder(artist_name, -popularity), y = track_popularity)) +
+  geom_boxplot() +
+  geom_point(aes(y = popularity), color = "red", position = position_jitter(width = 0.2), size = 1, alpha = 0.5) +
+  labs(title = "Artist Overall popularity vs Songs Popularity Box Plot",
+       x = "Artists (Names omitted, desc. by overall popularity)",
+       y = "Songs Popularity Boxplot")+
+  annotate("text", x = 20, y = 95, label = "Artist popularity (Red dots)", hjust = 1, vjust = 0, size = 3, color = "red")+
+  annotate("text", x = 25, y = 35, label = "Songs popularity (Black boxplots)", hjust = 1, vjust = 0, size = 3)+
+  annotate("text", x = 30, y = 5, label = "Source: Rolling Stone, Spotify", hjust = 1, vjust = 0, size = 4)+
+  annotate("text", x = 50, y = 0, label = "Red dots denote each artist's popularity, others are songs popularity", hjust = 1, vjust = 0, size = 2.8)+
+  theme(axis.text.x = element_blank())
+
+ggsave(filename = "pop_artist_songs_plot_2.png", plot = pop_artist_songs_plot_2, width = 6, height = 4, dpi = 300)
+
+#Join songs features to mother songs data
+songs_data_df_all_analysis <- left_join(songs_data_df_all_analysis, songs_features_data_all, by = "track_id")
+songs_data_df_all_analysis <- songs_data_df_all_analysis[!duplicated(songs_data_df_all_analysis$track_id), ]
+songs_data_df_all_analysis <- songs_data_df_all_analysis[!duplicated(songs_data_df_all_analysis$track_name), ]
+
+#For the analysis, create a correlation matrix between songs popularity and features, output as matrix
+numeric_cols <- sapply(songs_data_df_all_analysis, is.numeric)
+numeric_data <- songs_data_df_all_analysis[, numeric_cols]
+cor_with_track_popularity <- cor(numeric_data, songs_data_df_all_analysis$track_popularity)
+
+
+#Melt for plotting, delete unnecessary columns
+cor_melted <- melt(cor_with_track_popularity)
+cor_melted_filtered <- cor_melted %>%
+  filter(!(Var1 %in% c("track_local_flag", "track_number", "Rolling_Artist_Rank", "popularity", "followers.total", "track_popularity","duration_ms","time_signature","album_total_tracks")))
+cor_melted_filtered <- cor_melted_filtered %>%
+  arrange(desc(value))
+cor_melted_filtered$Var1 <- factor(cor_melted_filtered$Var1, levels = unique(cor_melted_filtered$Var1))
+
+
+#Plot as a Heatmap with explanation of features (for detailed definition of features, see https://developer.spotify.com/documentation/web-api/reference/get-several-audio-features )
+track_corr_heatmap_plot_3 <- ggplot(cor_melted_filtered, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", limits = c(-0.5, 0.5), midpoint = 0) +
+  labs(title = "Songs features' Correlation with Popularity",
+       x = "Songs Features",
+       y = "Popularity") +
+  coord_fixed(ratio = 0.5) +
+  scale_x_discrete(labels = c("*Loudness*", "*Danceability*", "*Energy*", "Duration(milliseconds)", "Tempo(beats per minute)", "*Speechness*", "*Key*", "*Mode*", "*Instrumentalness*", "*Valence*", "*Liveness*", "*Acousticness*"))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size = 10))+
+  theme(axis.text.y = element_blank())+
+  theme(axis.title.y = element_text(size = 11))+
+  theme(plot.margin = margin(t = 0, r = 0, b = 3, l = 0, unit = "lines")) +
+  labs(caption = "Source: Spotify. Enclosed * * items are scored between 0 to 1 (Loudness: -60 to 0, Key: -1 to 11) as the strength of features.\n Calculated by Spotify. Details: https://developer.spotify.com/documentation/web-api/reference/get-several-audio-features")
+
+ggsave(filename = "track_corr_heatmap_plot_3.png", plot = track_corr_heatmap_plot_3, width = 8, height = 4, dpi = 300)
+
+#(Note 24: Detailed correlation matrix with scatter plots(individual songs' level) can be described by using the pairs() function, for example as shown below, but not conducted in this report)
+#pairs(numeric_data, lower.tail=NULL)
+
+#(Note 25: Statistical information, commented out)
+#track_popularity_features_lm <- lm(track_popularity ~ loudness + danceability + liveness + acousticness, data = songs_data_df_all_analysis)
+#summary(track_popularity_features_lm)  p-value of dancebility is 0.064 (significnce is not strong). Others are under 0.05. 
+
+#Append lyrics data to songs data, drop off rows with duplication and data missing
+songs_data_df_all_analysis_genius <- left_join(songs_data_df_all_analysis, genius_lyrics_features, by = c("track_name"="genius_mother_track_name"))
+songs_data_df_all_analysis_genius <- songs_data_df_all_analysis_genius[!is.na(songs_data_df_all_analysis_genius$n_chapter_lyrics), ] 
+songs_data_df_all_analysis_genius <- songs_data_df_all_analysis_genius[!duplicated(songs_data_df_all_analysis_genius$track_name), ] 
+#(Note 26: Examining the empty (no words in the data frame) 4 items, drop off these 2 songs. That's because these are originally NOT songs WITHOUT lyrics (instrumental), and the blank seems to be due to the delay in updating information on the website.)
+songs_data_df_all_analysis_genius <- songs_data_df_all_analysis_genius %>% filter (track_name != "Lola (2020 Stereo Remaster)" & track_name != "Don't You Worry 'Bout A Thing" ) 
+
+#615 songs remain (commented out)
+#nrow(songs_data_df_all_analysis_genius)
+
+#Transform lyrics features to numeric and create additional variables (explanations are below) by calculation
+songs_data_df_all_analysis_genius$n_chapter_lyrics <- as.numeric(songs_data_df_all_analysis_genius$n_chapter_lyrics)
+songs_data_df_all_analysis_genius$n_words_lyrics <- as.numeric(songs_data_df_all_analysis_genius$n_words_lyrics)
+songs_data_df_all_analysis_genius$n_words_distinct <- as.numeric(songs_data_df_all_analysis_genius$n_words_distinct)
+songs_data_df_all_analysis_genius$words_diversity <- as.numeric(songs_data_df_all_analysis_genius$n_words_distinct / songs_data_df_all_analysis_genius$n_words_lyrics) #Measuring words' diversity as a ratio of unique words to total words
+songs_data_df_all_analysis_genius$words_diversity[is.nan(songs_data_df_all_analysis_genius$words_diversity)] <- 0
+songs_data_df_all_analysis_genius$words_music_ratio <- 1000 * songs_data_df_all_analysis_genius$n_words_lyrics / songs_data_df_all_analysis_genius$duration_ms #Number of words per music length (converted second), as an intensity of word 
+songs_data_df_all_analysis_genius$chapters_music_ratio <- 1000* 60 * songs_data_df_all_analysis_genius$n_chapter_lyrics / songs_data_df_all_analysis_genius$duration_ms #Average chapter volumes in a song (converted minute)
+
+#(Note 27: Check the correlation between songs popularity. Commented out. In sum, excluding the weak positive relationship between "n_chapter_lyric"(number of chapters) and "track_popularity"(popularity), no clear relationships are observed.)
+#cor_lyrics_pop_matrix <- cor(songs_data_df_all_analysis_genius[c("track_popularity", "n_chapter_lyrics", "n_words_lyrics", "n_words_distinct", "words_diversity", "chapters_music_ratio","words_music_ratio")])
+#cor_lyrics_pop_matrix 
+
+#Then, changing the angle from individual songs to grouped(ordered) categorical analysis (although not using statistical method like categorical regression in this report): split songs data by three folds by popularity ("top", "middle", "bottom")
+
+songs_data_df_all_analysis_genius <- songs_data_df_all_analysis_genius[order(-songs_data_df_all_analysis_genius$track_popularity), ]
+track_popularity_border <- round(nrow(songs_data_df_all_analysis_genius) / 3)
+
+songs_data_df_all_analysis_genius$track_popularity_category <- "middle"
+songs_data_df_all_analysis_genius$track_popularity_category[1:track_popularity_border] <- "top"
+songs_data_df_all_analysis_genius$track_popularity_category[(nrow(songs_data_df_all_analysis_genius) - track_popularity_border + 1):nrow(songs_data_df_all_analysis_genius)] <- "bottom"
+
+#Plot lyrics features with explanations
+n_chapter_lyrics_plot  <- ggplot(songs_data_df_all_analysis_genius, aes(x = n_chapter_lyrics, fill = factor(track_popularity_category, levels = c("top", "middle", "bottom")))) +
+  geom_bar(position = "fill", alpha = 0.7) +
+  labs(x = "N(number) of Chapters", y = "distribution(%)") + 
+  scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = c("bottom" = "gray", "middle" = "green", "top" = alpha("red", 0.2))) + 
+  theme_minimal() +
+  theme(legend.position = "none") +
+  annotate("text", x = 2.3, y = 0.8, label = "Top (popularity)", size = 2.7) +
+  annotate("text", x = 2, y = 0.5, label = "Middle", size = 3) +
+  annotate("text", x = 2, y = 0.2, label = "Bottom", size = 3) +
+  annotate("text", x = 1.7, y = 0.05, label = "Source: Genius, Spotify. Same for others", size = 2.1)+
+  geom_segment(aes(x = 0, y = 0.9, xend = 4, yend = 0.5),
+               arrow = arrow(length = unit(0.25, "inches")), color = "red", size = 0.5) 
+
+n_words_lyrics_plot <- ggplot(songs_data_df_all_analysis_genius, aes(x =  n_words_lyrics, fill = factor(track_popularity_category, levels = c("top", "middle", "bottom")))) +
+  geom_histogram(position = "fill", alpha = 0.7, bins = 30) +
+  labs(x = "N of Words", y = "") + 
+  scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = c("bottom" = "gray", "middle" = "green", "top" = alpha("red", 0.2))) + 
+  theme_minimal() +
+  theme(legend.position = "none")+
+  annotate("text", x = 620, y = 0.05, label = "Red arrow is a rough sketch. Same for others", size = 2.1)+
+  geom_segment(aes(x = 0, y = 0.9, xend = 1200, yend = 0.3),
+               arrow = arrow(length = unit(0.25, "inches")), color = "red", size = 0.5)
+  
+n_words_distinct_plot <- ggplot(songs_data_df_all_analysis_genius, aes(x =  n_words_distinct, fill = factor(track_popularity_category, levels = c("top", "middle", "bottom")))) +
+  geom_histogram(position = "fill", alpha = 0.7) +
+  labs(x = "N of Distinct Words", y = "distribution") + 
+  scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = c("bottom" = "gray", "middle" = "green", "top" = alpha("red", 0.2))) + 
+  theme_minimal() +
+  theme(legend.position = "none")+
+  geom_segment(aes(x = 0, y = 0.9, xend = 500, yend = 0.3),
+               arrow = arrow(length = unit(0.25, "inches")), color = "red", size = 0.5)
+
+words_diversity_plot <- ggplot(songs_data_df_all_analysis_genius, aes(x =  words_diversity, fill = factor(track_popularity_category, levels = c("top", "middle", "bottom")))) +
+  geom_histogram(position = "fill", alpha = 0.7) +
+  labs(x = "Words Diversity",y = "") + 
+  scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = c("bottom" = "gray", "middle" = "green", "top" = alpha("red", 0.2))) + 
+  theme_minimal() +
+  theme(legend.position = "none")+
+  annotate("text", x = 0.3, y = 0.05, label = "N of distinct words / N of total words", size = 2.1)+
+  geom_segment(aes(x = 0, y = 0.3, xend = 0.75, yend = 0.75),
+               arrow = arrow(length = unit(0.25, "inches")), color = "red", size = 0.5)
+  
+
+chapters_music_ratio_plot <- ggplot(songs_data_df_all_analysis_genius, aes(x =  chapters_music_ratio, fill = factor(track_popularity_category, levels = c("top", "middle", "bottom")))) +
+  geom_histogram(position = "fill", alpha = 0.7) +
+  labs(x = "Chapters Intensity", y = "distribution") +
+  scale_x_continuous(labels = function(x) sprintf("%.1f", x), expand = c(0, 0))+
+  scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = c("bottom" = "gray", "middle" = "green", "top" = alpha("red", 0.2))) + 
+  theme_minimal() +
+  theme(legend.position = "none")+
+  annotate("text", x = 0.66, y = 0.05, label = "N of chapters / music duration(minutes)", size = 2.1)+
+  geom_segment(aes(x = 0, y = 0.9, xend = 1.2, yend = 0.5),
+               arrow = arrow(length = unit(0.25, "inches")), color = "red", size = 0.5)
+
+words_music_ratio_plot <- ggplot(songs_data_df_all_analysis_genius, aes(x =  words_music_ratio, fill = factor(track_popularity_category, levels = c("top", "middle", "bottom")))) +
+  geom_histogram(position = "fill", alpha = 0.7) +
+  labs(x = "Words Intensity",y = "") + 
+  scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = c("bottom" = "gray", "middle" = "green", "top" = alpha("red", 0.2))) + 
+  theme_minimal() +
+  theme(legend.position = "none")+
+  annotate("text", x = 1.6, y = 0.05, label = "N of words / music duration(seconds)", size = 2.1)+
+  geom_segment(aes(x = 0, y = 0.9, xend = 4, yend = 0.3),
+               arrow = arrow(length = unit(0.25, "inches")), color = "red", size = 0.5)
+
+lyrics_feature_plot_4 <- grid.arrange(n_chapter_lyrics_plot, n_words_lyrics_plot, n_words_distinct_plot, 
+             words_diversity_plot, chapters_music_ratio_plot, words_music_ratio_plot)
+
+ggsave(filename = "lyrics_feature_plot_4.png", plot = lyrics_feature_plot_4, width = 8, height = 4, dpi = 300)
+
+#Compare frequent words between popular songs and unpopular songs
+#Create a function to pull frequently used words (20 words respectively) from each song's pool of the top five words.
+top_words <- function(data) {
+    word_columns <- paste0("freq_word_", 1:5)
+    all_words <- unlist(data[, word_columns])
+    word_counts <- table(all_words)
+    top_20_words <- head(sort(word_counts, decreasing = TRUE), 20)
+    return(top_20_words)
+}
+
+#Apply it for top and bottom songs groups
+songs_data_df_all_analysis_genius_high_pop　<- subset(songs_data_df_all_analysis_genius, track_popularity_category == "top")
+songs_data_df_all_analysis_genius_low_pop　<- subset(songs_data_df_all_analysis_genius, track_popularity_category == "bottom")
+high_pop_top_20_words <- top_words(songs_data_df_all_analysis_genius_high_pop[, paste0("freq_word_", 1:5)])
+low_pop_top_20_words <-  top_words(songs_data_df_all_analysis_genius_low_pop[, paste0("freq_word_", 1:5)])
+
+#Pick up unique words in top and bottom
+high_pop_unique <- setdiff(names(high_pop_top_20_words), names(low_pop_top_20_words))
+low_pop_unique <- setdiff(names(low_pop_top_20_words), names(high_pop_top_20_words))
+
+#print words (commennted out, but result shown in .html document in the main section)
+#(Note 28: for easiness of word counts, all "'" are excluded when accessing original data source)
+#print("High Popularity Unique Words:")
+#print(high_pop_unique) # "dont" (including: "don't") "all" "is" "of" "christmas" "no" 
+#print("Low Popularity Unique Words:")
+#print(low_pop_unique) # "love" "baby" "oh"  "we"  "come" (omitted "0", which stands for no lyrics)
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the analysis tables to SQLite
+dbWriteTable(db, "songs_data_df_all_analysis", songs_data_df_all_analysis, row.names = FALSE, overwrite = TRUE)
+dbWriteTable(db, "songs_data_df_all_analysis_genius", songs_data_df_all_analysis_genius, row.names = FALSE, overwrite = TRUE)
+dbWriteTable(db, "songs_data_df_all_analysis_genius_high_pop", songs_data_df_all_analysis_genius_high_pop, row.names = FALSE, overwrite = TRUE)
+dbWriteTable(db, "songs_data_df_all_analysis_genius_low_pop", songs_data_df_all_analysis_genius_low_pop, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+
+### Plot 2: Artist Popularity vs Songs Popularity
+### ![Plot 2: Artist Popularity vs Songs Popularity](pop_artist_songs_plot_2.png)
+
+#### *Memo for Plot 2*
+・Artists' overall popularity and their songs' popularity are highly correlated
+
+
+
+### Plot 3: Songs Features vs Spotify Popularity
+### ![Plot 3: Songs Features vs Popularity](track_corr_heatmap_plot_3.png)
+
+#### *Memo for Plot 3*
+・Positive correlation: loudness, danceability and energy
+
+・Negative correlation: acousticness (resonant elements of the physical instrument), liveness (atmosphere of listening to songs on the spot) 
+
+
+### Plot 4: Lyrics Features vs Spotify Songs Popularity
+### ![Plot 4: Lyrics Features vs Songs popularity](lyrics_feature_plot_4.png)
+
+#### Frequent words 
+  
+  __Top__ 1/3 popular songs frequent words: __`r high_pop_unique`__  
+  (※ "dont" includes "don't") 
+  
+  __Bottom__ 1/3 popular songs unique frequent words: __`r low_pop_unique`__  
+  (※ "0" includes null)
+  
+  Source: Genius
+  
+  Methodology: Based on the data of the top 5 frequent words for each song, collect 20 frequent words for two groups (of top one-third and bottom one-third in terms of popularity in Spotify). Then, extract unique words only in one group respectively.
+
+#### *Memo for Plot 4 and Frequent Words*
+・Popular songs tend to have more chapters and words, but lower diversity of words, higher intensity(density) of chapters and words.
+
+・Top songs often contain assertive words with strong impressions, like "don't" “all” and "no". 
+
+```{r main_code_chunk 13 Analysis 3, echo=FALSE, message=FALSE, warning=FALSE, error=FALSE, include=FALSE}
+
+#Last I would focus on iTunes data for analysis related to movies.
+#Count the number of search results conducted on the Movie section in iTunes, by names of artists (Totally 955 hits (not shown in .html file))
+#(Note 29: iTunes API's limit is 200. As shown later, all artists are under 200.) 
+itunes_movie_artist_exposure_rolling_spotify <- itunes_movie_result_by_artist %>%
+  group_by(rolling_artist_name) %>%
+  summarise(artist_in_movie = n()) 
+
+#Left join it with mother Rolling Stone's artists data also containing Spotify popularity
+ itunes_movie_artist_exposure_rolling_spotify <- left_join(
+  itunes_movie_artist_exposure_rolling_spotify,
+  Merged_Rolling_Spotify_cleaned,
+  by = c("rolling_artist_name" = "Rolling_Artist_Name"))
+
+#Plot the relationship between artist exposure in iTunes movies and popularity in Spotify 
+movie_and_pop_1 <- ggplot(itunes_movie_artist_exposure_rolling_spotify, aes(x=artist_in_movie, y=popularity))+
+   geom_point()+
+   ggtitle("Artists' Movie Exposure vs Spotify Popularity")+
+   geom_smooth(method = "glm", formula = y ~ log(x))+
+   scale_y_continuous(limits = c(0, 100))+
+   theme(plot.title = element_text(size = 8))+
+   theme(plot.margin = margin(t = 0, r = 0, b = 3, l = 0, unit = "lines")) +
+  labs(x = "Number of search results in iTunes movie section", y = "Spotify polularity", caption = "Source: Apple, Spotify")+
+  theme(axis.title.x = element_text(size = 7))+
+  annotate("text", x = 120, y = 1, label = "Each dot shows individual artists", hjust = 1, vjust = 0, size = 3)
+
+#Exclude some upper values as outliers 
+itunes_movie_artist_exposure_rolling_spotify_non_outlier <- subset(itunes_movie_artist_exposure_rolling_spotify, artist_in_movie < 50)
+
+movie_and_pop_2 <- ggplot(itunes_movie_artist_exposure_rolling_spotify_non_outlier, aes(x=artist_in_movie, y=popularity))+
+   geom_point()+
+   ggtitle("... without outliers")+
+   geom_smooth(method = "glm", formula = y ~ log(x))+
+   scale_y_continuous(limits = c(0, 100))+
+   theme(plot.title = element_text(size = 8))+
+   theme(plot.margin = margin(t = 0, r = 0, b = 3, l = 0, unit = "lines")) +
+   labs(x = "Number of search results in iTunes movie section", y = "Spotify Polularity", caption = "Source: Apple, Spotify")+
+   theme(axis.title.x = element_text(size = 7))+
+   annotate("text", x = 28, y = 1, label = "Each dot shows individual artists", hjust = 1, vjust = 0, size = 3)
+
+#Plot and save to display on .html
+plot_artist_movie_5 <- grid.arrange(movie_and_pop_1, movie_and_pop_2, ncol = 2)
+ggsave(filename = "plot_artist_movie_5.png", plot = plot_artist_movie_5, width = 6, height = 4, dpi = 300)
+
+#(Note 30: Statistical information, commented out : Logarithmic regression of artist_in_movie(number of search results in iTunes movie section) and their popularity (without outliers))
+#artist_movie_pop_model <- glm(popularity ~ log(artist_in_movie), data = itunes_movie_artist_exposure_rolling_spotify, family = gaussian)
+#summary(artist_movie_pop_model) 
+#The number of search results is statistically positively correlated with artists' popularity, although additional analysis is needed to evaluate the degree of significance. 
+
+#Connect to the database
+db <- dbConnect(SQLite(), dbname = file.path(folder_path, my_db))
+
+#Write the "itunes_movie_artist_exposure_rolling_spotify" to SQLite
+dbWriteTable(db, "itunes_movie_artist_exposure_rolling_spotify", itunes_movie_artist_exposure_rolling_spotify, row.names = FALSE, overwrite = TRUE)
+
+#Disconnect
+dbDisconnect(db)
+```
+
+### Plot 5: Spotify Popularity vs Movie Exposure
+### ![Plot 5: Spotify Popularity vs Movie Exposure](plot_artist_movie_5.png)
+#### *Memo for Plot 5*
+・There is a positive logarithmic relationship, with wide confidence intervals, between artists' exposure in movies and their popularity in Spotify
+
+・This is also observed after excluding the outliers
+
+#### *Code Appendix*: All codes in this final report
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE, warning=FALSE, error=FALSE} 
+
+```
